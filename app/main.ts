@@ -5,7 +5,7 @@ console.log("Logs from your program will appear here!");
 
 const server: net.Server = net.createServer((connection: net.Socket) => {
   // Handle connection
-  connection.on("PING", () => {
+  connection.on("data", (data) => {
     connection.write(`+PONG\r\n`);
   });
 });
