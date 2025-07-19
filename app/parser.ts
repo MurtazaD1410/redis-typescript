@@ -2,18 +2,14 @@ const data = "*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n";
 
 export const parseRespArray = (data: string) => {
   const splitData = data.split("\r\n");
-  let command;
-  let argument;
+  const elements = [];
 
-  for (let i = 0; i < splitData.length; i++) {
-    const element = splitData[i];
-
-    if (element.startsWith("$")) {
-      command = splitData[i + 1];
-      argument = splitData[i + 3];
-      break;
+  for (let i = 1; i < splitData.length; i++) {
+    if (splitData[i].startsWith("$")) {
+      elements.push(splitData[i + 1]);
+      i++;
     }
   }
 
-  return { command, argument };
+  return { command: elements[0], commandArgs: elements.slice(1) ?? [] };
 };
