@@ -6,6 +6,10 @@
     "dev": "bun run app/main.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "ts-node": "^10.9.2"
+  },
+  "dependencies": {
+    "nodemon": "^3.1.10"
   }
 }
