@@ -118,6 +118,17 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         connection.write(`:${list.length}\r\n`);
       }
     }
+    if (command?.toUpperCase() === "LPOP") {
+      const listName = commandArgs[0];
+      const list = listMap[listName];
+      if (!list) {
+        connection.write(`$-1\r\n`);
+      } else {
+        const removed = list[0];
+        list.shift();
+        connection.write(`$${removed.length}\r\n${removed}\r\n`);
+      }
+    }
   });
 });
 
