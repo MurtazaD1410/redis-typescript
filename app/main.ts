@@ -54,7 +54,6 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
     }
     if (command?.toUpperCase() === "RPUSH") {
       const listName = commandArgs[0];
-      const value = commandArgs[1];
 
       if (!listMap[listName]) {
         listMap[listName] = [...commandArgs.slice(1)];
@@ -63,6 +62,30 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         listMap[listName].push(...commandArgs.slice(1));
         connection.write(`:${listMap[listName].length}\r\n`);
       }
+
+      console.log(listMap[listName]);
+    }
+    if (command.toUpperCase() === "LRANGE") {
+      console.log(listMap);
+      const listName = commandArgs[0];
+      console.log(listName);
+      const startIndex = parseInt(commandArgs[1]);
+      const endIndex = parseInt(commandArgs[2]);
+      console.log(startIndex, endIndex);
+      const list = listMap[listName];
+      console.log(list);
+      let itemCount = 0;
+      let outputStr = "";
+      if (!list || list.length === 0 || endIndex < startIndex) outputStr = "";
+      else {
+        const result = list.slice(startIndex, endIndex + 1);
+        result.forEach((item) => {
+          itemCount++;
+          outputStr += `$${item.length}\r\n${item}\r\n`;
+        });
+      }
+
+      connection.write(`*${itemCount}\r\n${outputStr}`);
     }
   });
 });
