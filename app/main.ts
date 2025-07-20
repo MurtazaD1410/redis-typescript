@@ -108,6 +108,16 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         connection.write(`:${listMap[listName].length}\r\n`);
       }
     }
+
+    if (command?.toUpperCase() === "LLEN") {
+      const listName = commandArgs[0];
+      const list = listMap[listName];
+      if (!list) {
+        connection.write(`:0\r\n`);
+      } else {
+        connection.write(`:${list.length}\r\n`);
+      }
+    }
   });
 });
 
