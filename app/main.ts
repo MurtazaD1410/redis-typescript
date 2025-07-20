@@ -3,6 +3,11 @@ import { parseRespArray } from "./parser";
 
 const map: Record<string, { value: string; expiresAt?: number }> = {};
 const listMap: Record<string, string[]> = {};
+let waitingClients: Array<{
+  connection: net.Socket;
+  lists: string[];
+  timeout: number;
+}> = [];
 
 // You can use print statements as follows for debugging, they'll be visible when running tests.
 console.log("Logs from your program will appear here!");
@@ -62,6 +67,18 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         listMap[listName].push(...commandArgs.slice(1));
         connection.write(`:${listMap[listName].length}\r\n`);
       }
+
+      for (let i = waitingClients.length - 1; i >= 0; i--) {
+        const client = waitingClients[i];
+        if (client.lists.includes(listName)) {
+          const poppedElement = listMap[listName].shift();
+          client.connection.write(
+            `*2\r\n$${listName.length}\r\n${listName}\r\n$${poppedElement?.length}\r\n${poppedElement}\r\n`
+          );
+          waitingClients.splice(i, 1); // Remove from waiting list
+          break; // Only wake up one client!
+        }
+      }
     }
     if (command.toUpperCase() === "LRANGE") {
       const listName = commandArgs[0];
@@ -107,6 +124,18 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         listMap[listName].unshift(...items);
         connection.write(`:${listMap[listName].length}\r\n`);
       }
+
+      for (let i = waitingClients.length - 1; i >= 0; i--) {
+        const client = waitingClients[i];
+        if (client.lists.includes(listName)) {
+          const poppedElement = listMap[listName].shift();
+          client.connection.write(
+            `*2\r\n$${listName.length}\r\n${listName}\r\n$${poppedElement?.length}\r\n${poppedElement}\r\n`
+          );
+          waitingClients.splice(i, 1); // Remove from waiting list
+          break; // Only wake up one client!
+        }
+      }
     }
 
     if (command?.toUpperCase() === "LLEN") {
@@ -145,6 +174,29 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
           itemsToDel--;
         }
         connection.write(`*${itemCount}\r\n${outputStr}`);
+      }
+    }
+    if (command?.toUpperCase() === "BLPOP") {
+      let found = false;
+      const timer = commandArgs[commandArgs.length - 1];
+      const listNames = commandArgs.slice(0, -1);
+
+      for (const listName of listNames) {
+        const list = listMap[listName];
+        if (list && list.length > 0) {
+          found = true;
+          const removedItem = list.shift();
+          connection.write(
+            `*2\r\n$${listName.length}\r\n${listName}\r\n$${removedItem?.length}\r\n${removedItem}\r\n`
+          );
+        }
+      }
+      if (!found) {
+        waitingClients.push({
+          connection: connection,
+          lists: listNames,
+          timeout: parseInt(timer),
+        });
       }
     }
   });
