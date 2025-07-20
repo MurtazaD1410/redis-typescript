@@ -67,10 +67,8 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       const listName = commandArgs[0];
       const startIndex = parseInt(commandArgs[1]);
       const endIndex = parseInt(commandArgs[2]);
-      console.log(startIndex, endIndex);
 
       const list = listMap[listName];
-      console.log(list);
       if (!list) {
         connection.write(`*0\r\n`);
         return;
@@ -97,6 +95,18 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       }
 
       connection.write(`*${itemCount}\r\n${outputStr}`);
+    }
+    if (command?.toUpperCase() === "LPUSH") {
+      const listName = commandArgs[0];
+      const items = [...commandArgs.slice(1).reverse()];
+
+      if (!listMap[listName]) {
+        listMap[listName] = items;
+        connection.write(`:${listMap[listName].length}\r\n`);
+      } else {
+        listMap[listName].unshift(...items);
+        connection.write(`:${listMap[listName].length}\r\n`);
+      }
     }
   });
 });
