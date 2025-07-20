@@ -59,6 +59,9 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       if (!listMap[listName]) {
         listMap[listName] = [value];
         connection.write(`:${listMap[listName].length}\r\n`);
+      } else {
+        listMap[listName].push(value);
+        connection.write(`:${listMap[listName].length}\r\n`);
       }
     }
   });
