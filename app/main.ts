@@ -2,6 +2,7 @@ import * as net from "net";
 import { parseRespArray } from "./parser";
 
 const map: Record<string, { value: string; expiresAt?: number }> = {};
+const listMap: Record<string, string[]> = {};
 
 // You can use print statements as follows for debugging, they'll be visible when running tests.
 console.log("Logs from your program will appear here!");
@@ -49,6 +50,15 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
             map[commandArgs[0]].value
           }\r\n`
         );
+      }
+    }
+    if (command?.toUpperCase() === "RPUSH") {
+      const listName = commandArgs[0];
+      const value = commandArgs[1];
+
+      if (!listMap[listName]) {
+        listMap[listName] = [value];
+        connection.write(`:${listMap[listName].length}\r\n`);
       }
     }
   });
