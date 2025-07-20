@@ -57,10 +57,10 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       const value = commandArgs[1];
 
       if (!listMap[listName]) {
-        listMap[listName] = [value];
+        listMap[listName] = [...commandArgs.slice(1)];
         connection.write(`:${listMap[listName].length}\r\n`);
       } else {
-        listMap[listName].push(value);
+        listMap[listName].push(...commandArgs.slice(1));
         connection.write(`:${listMap[listName].length}\r\n`);
       }
     }
