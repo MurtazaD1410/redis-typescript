@@ -62,23 +62,34 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         listMap[listName].push(...commandArgs.slice(1));
         connection.write(`:${listMap[listName].length}\r\n`);
       }
-
-      console.log(listMap[listName]);
     }
     if (command.toUpperCase() === "LRANGE") {
-      console.log(listMap);
       const listName = commandArgs[0];
-      console.log(listName);
       const startIndex = parseInt(commandArgs[1]);
       const endIndex = parseInt(commandArgs[2]);
       console.log(startIndex, endIndex);
+
       const list = listMap[listName];
       console.log(list);
+      if (!list) {
+        connection.write(`*0\r\n`);
+        return;
+      }
+      const normalizeIndex = (index: number) => {
+        if (index < 0) {
+          return Math.max(list.length + index, 0);
+        }
+        return Math.min(index, list.length - 1);
+      };
+
+      const actualStart = normalizeIndex(startIndex);
+      const actualEnd = normalizeIndex(endIndex);
+
       let itemCount = 0;
       let outputStr = "";
-      if (!list || list.length === 0 || endIndex < startIndex) outputStr = "";
+      if (!list || list.length === 0 || actualEnd < actualStart) outputStr = "";
       else {
-        const result = list.slice(startIndex, endIndex + 1);
+        const result = list.slice(actualStart, actualEnd + 1);
         result.forEach((item) => {
           itemCount++;
           outputStr += `$${item.length}\r\n${item}\r\n`;
