@@ -202,13 +202,6 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
           );
         }
       }
-      // if (!found) {
-      //   waitingClients.push({
-      //     connection: connection,
-      //     lists: listNames,
-      //     timeout: timer === "0" ? 0 : Date.now() + parseInt(timer) * 1000,
-      //   });
-      // }
       if (!found) {
         const client: {
           connection: net.Socket;
@@ -239,6 +232,17 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
 
           client.timeoutId = timeoutId; // Store the timeout ID
         }
+      }
+    }
+    if (command?.toUpperCase() === "TYPE") {
+      const name = commandArgs[0];
+
+      if (map[name]) {
+        connection.write(`+string\r\n`);
+      } else if (listMap[name]) {
+        connection.write(`+list\r\n`);
+      } else {
+        connection.write(`+none\r\n`);
       }
     }
   });
