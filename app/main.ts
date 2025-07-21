@@ -319,9 +319,12 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
               (item) =>
                 item.id === (!start.split("-")[1] ? `${start}-0` : start)
             );
-      const endIndex = streamsMap[streamName].findIndex(
-        (item) => item.id === (!end.split("-")[1] ? `${end}-0` : end)
-      );
+      const endIndex =
+        end === "+"
+          ? streamsMap[streamName].length - 1
+          : streamsMap[streamName].findIndex(
+              (item) => item.id === (!end.split("-")[1] ? `${end}-0` : end)
+            );
 
       const outputData = streamsMap[streamName]
         .slice(startIndex, endIndex + 1)
