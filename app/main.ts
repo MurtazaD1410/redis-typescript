@@ -345,6 +345,47 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
 
       connection.write(`*${outputData.length}\r\n${outputStr}`);
     }
+    if (command?.toUpperCase() === "XREAD") {
+      const streamsAndIds: string[] = commandArgs.slice(
+        commandArgs.findIndex((item) => item.toUpperCase() === "STREAMS") + 1
+      );
+
+      const streamArray = streamsAndIds.slice(0, streamsAndIds.length / 2);
+
+      const idsArray = streamsAndIds.slice(streamsAndIds.length / 2);
+
+      let outputStr = "";
+
+      streamArray.forEach((streamName, index) => {
+        outputStr += `*${streamArray.length}\r\n*2\r\n$${streamName.length}\r\n${streamName}\r\n`;
+        const startIndex = streamsMap[streamName].findIndex(
+          (item) =>
+            item.id >
+            (!idsArray[index].split("-")[1]
+              ? `${idsArray[index]}-0`
+              : idsArray[index])
+        );
+
+        const outputData = streamsMap[streamName]
+          .slice(startIndex)
+          .map((entry) => {
+            const { id, ...fields } = entry; // Extract id and remaining fields
+            const fieldArray = Object.entries(fields).flat(); // Convert fields to flat array
+            return [id, fieldArray];
+          });
+
+        outputStr += `*${outputData.length}\r\n`;
+        outputData.forEach((item) => {
+          outputStr += `*${item.length}\r\n$${item[0].length}\r\n${item[0]}\r\n*${item[1].length}\r\n`;
+          (item[1] as string[]).forEach((field) => {
+            outputStr += `$${field.length}\r\n${field}\r\n`;
+          });
+        });
+      });
+      console.log(outputStr);
+
+      connection.write(`${outputStr}`);
+    }
   });
 });
 
