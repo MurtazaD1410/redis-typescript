@@ -253,7 +253,11 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       if (!streamsMap[streamName]) {
         streamsMap[streamName] = [];
       }
-      const id = commandArgs[1];
+      let id = commandArgs[1];
+      if (id === "*") {
+        id = `${Date.now()}-0`;
+      }
+
       const entry: Record<string, string> = { id: id };
       for (let i = 2; i < commandArgs.length; i += 2) {
         const key = commandArgs[i];
