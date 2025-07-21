@@ -3,6 +3,7 @@ import { parseRespArray } from "./parser";
 
 const map: Record<string, { value: string; expiresAt?: number }> = {};
 const listMap: Record<string, string[]> = {};
+const streamsMap: Record<string, Record<string, string>> = {};
 let waitingClients: Array<{
   connection: net.Socket;
   lists: string[];
@@ -17,7 +18,7 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
   // Handle connection
   connection.on("data", (data) => {
     const { command, commandArgs } = parseRespArray(data.toString());
-    if (command === "PING") {
+    if (command?.toUpperCase() === "PING") {
       connection.write(`+PONG\r\n`);
     }
     if (command?.toUpperCase() === "ECHO") {
@@ -86,7 +87,7 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         }
       }
     }
-    if (command.toUpperCase() === "LRANGE") {
+    if (command?.toUpperCase() === "LRANGE") {
       const listName = commandArgs[0];
       const startIndex = parseInt(commandArgs[1]);
       const endIndex = parseInt(commandArgs[2]);
@@ -148,7 +149,6 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         }
       }
     }
-
     if (command?.toUpperCase() === "LLEN") {
       const listName = commandArgs[0];
       const list = listMap[listName];
@@ -241,9 +241,27 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         connection.write(`+string\r\n`);
       } else if (listMap[name]) {
         connection.write(`+list\r\n`);
+      } else if (streamsMap[name]) {
+        connection.write(`+stream\r\n`);
       } else {
         connection.write(`+none\r\n`);
       }
+    }
+    if (command?.toUpperCase() === "XADD") {
+      const streamName = commandArgs[0];
+      if (!streamsMap[streamName]) {
+        streamsMap[streamName] = {};
+      }
+      const id = commandArgs[1];
+      streamsMap[streamName]["id"] = id;
+      for (let i = 2; i < commandArgs.length; i = i + 2) {
+        console.log(i);
+        const key = commandArgs[i];
+        const value = commandArgs[i + 1];
+        streamsMap[streamName][key] = value;
+      }
+
+      connection.write(`$${id.length}\r\n${id}\r\n`);
     }
   });
 });
