@@ -342,24 +342,3 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
 });
 
 server.listen(6379, "127.0.0.1");
-
-// const data = [
-//   { id: "0-2", bar: "baz" },
-//   { id: "0-3", baz: "foo" },
-// ];
-
-// const convertedArray = data.map((entry) => {
-//   const { id, ...fields } = entry; // Extract id and remaining fields
-//   const fieldArray = Object.entries(fields).flat(); // Convert fields to flat array
-//   return [id, fieldArray];
-// });
-// let outputStr = "";
-
-// convertedArray.forEach((item) => {
-//   outputStr += `*${item.length}\r\n`;
-//   (item[1] as string[]).forEach((field) => {
-//     outputStr += `$${field.length}\r\n${field}\r\n`;
-//   });
-// });
-
-// console.log(`*${convertedArray.length}\r\n${outputStr}`);
