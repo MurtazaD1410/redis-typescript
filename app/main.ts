@@ -271,7 +271,17 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
 
       if (oldId) {
         const [oldTimestamp, oldSequence] = oldId.split("-").map(Number);
-        const [newTimestamp, newSequence] = entry.id.split("-").map(Number);
+        // const [newTimestamp, newSequence] = entry.id.split("-").map(Number);
+        const [newTimestampStr, newSequenceStr] = entry.id.split("-");
+        const newTimestamp = Number(newTimestampStr);
+        let newSequence;
+
+        if (newSequenceStr === "*") {
+          if (oldTimestamp === newTimestamp) newSequence = oldSequence + 1;
+          else newSequence = 0;
+        } else {
+          newSequence = Number(newSequenceStr);
+        }
 
         if (
           newTimestamp < oldTimestamp ||
@@ -282,11 +292,17 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
           );
           return;
         }
+
+        entry.id = `${newTimestamp}-${newSequence}`;
+      } else {
+        if (entry.id.split("-")[1] === "*") {
+          entry.id = `${entry.id.split("-")[0]}-${1}`;
+        }
       }
 
       streamsMap[streamName].push(entry);
 
-      connection.write(`$${id.length}\r\n${id}\r\n`);
+      connection.write(`$${entry?.id?.length}\r\n${entry?.id}\r\n`);
     }
   });
 });
