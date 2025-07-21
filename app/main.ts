@@ -312,9 +312,13 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       const start = commandArgs[1];
       const end = commandArgs[2];
 
-      const startIndex = streamsMap[streamName].findIndex(
-        (item) => item.id === (!start.split("-")[1] ? `${start}-0` : start)
-      );
+      const startIndex =
+        start === "-"
+          ? 0
+          : streamsMap[streamName].findIndex(
+              (item) =>
+                item.id === (!start.split("-")[1] ? `${start}-0` : start)
+            );
       const endIndex = streamsMap[streamName].findIndex(
         (item) => item.id === (!end.split("-")[1] ? `${end}-0` : end)
       );
