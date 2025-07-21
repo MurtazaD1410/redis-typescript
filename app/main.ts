@@ -1,12 +1,19 @@
 import * as net from "net";
 import { parseRespArray } from "./parser";
+import { executeXreadForWaitingClient } from "./utils";
 
 const map: Record<string, { value: string; expiresAt?: number }> = {};
 const listMap: Record<string, string[]> = {};
 const streamsMap: Record<string, Array<Record<string, string>>> = {};
-let waitingClients: Array<{
+let waitingClientsForList: Array<{
   connection: net.Socket;
   lists: string[];
+  timeout: number;
+  timeoutId: Timer | null;
+}> = [];
+let waitingClientsForStreams: Array<{
+  connection: net.Socket;
+  streams: string[];
   timeout: number;
   timeoutId: Timer | null;
 }> = [];
@@ -70,11 +77,11 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         connection.write(`:${listMap[listName].length}\r\n`);
       }
 
-      for (let i = waitingClients.length - 1; i >= 0; i--) {
-        const client = waitingClients[i];
+      for (let i = waitingClientsForList.length - 1; i >= 0; i--) {
+        const client = waitingClientsForList[i];
         if (Date.now() > Date.now() + client.timeout && client.timeout !== 0) {
           client.connection.write("$-1\r\n");
-          waitingClients.splice(i, 1);
+          waitingClientsForList.splice(i, 1);
           break;
         }
         if (client.lists.includes(listName)) {
@@ -82,7 +89,7 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
           client.connection.write(
             `*2\r\n$${listName.length}\r\n${listName}\r\n$${poppedElement?.length}\r\n${poppedElement}\r\n`
           );
-          waitingClients.splice(i, 1);
+          waitingClientsForList.splice(i, 1);
           break;
         }
       }
@@ -132,11 +139,11 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         connection.write(`:${listMap[listName].length}\r\n`);
       }
 
-      for (let i = waitingClients.length - 1; i >= 0; i--) {
-        const client = waitingClients[i];
+      for (let i = waitingClientsForList.length - 1; i >= 0; i--) {
+        const client = waitingClientsForList[i];
         if (Date.now() > Date.now() + client.timeout && client.timeout !== 0) {
           client.connection.write("$-1\r\n");
-          waitingClients.splice(i, 1);
+          waitingClientsForList.splice(i, 1);
           break;
         }
         if (client.lists.includes(listName)) {
@@ -144,7 +151,7 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
           client.connection.write(
             `*2\r\n$${listName.length}\r\n${listName}\r\n$${poppedElement?.length}\r\n${poppedElement}\r\n`
           );
-          waitingClients.splice(i, 1); // Remove from waiting list
+          waitingClientsForList.splice(i, 1); // Remove from waiting list
           break; // Only wake up one client!
         }
       }
@@ -215,18 +222,18 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
           timeoutId: null,
         };
 
-        waitingClients.push(client); // Add to waiting list FIRST
+        waitingClientsForList.push(client); // Add to waiting list FIRST
 
         if (timer !== "0") {
           // Then set timeout for non-zero timeouts
           const timeoutId = setTimeout(() => {
             // Find and remove this specific client
-            const clientIndex = waitingClients.findIndex(
+            const clientIndex = waitingClientsForList.findIndex(
               (c) => c.connection === connection
             );
             if (clientIndex !== -1) {
               connection.write("*-1\r\n");
-              waitingClients.splice(clientIndex, 1);
+              waitingClientsForList.splice(clientIndex, 1);
             }
           }, parseFloat(timer) * 1000);
 
@@ -304,8 +311,32 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       }
 
       streamsMap[streamName].push(entry);
-      console.log(streamsMap[streamName]);
       connection.write(`$${entry?.id?.length}\r\n${entry?.id}\r\n`);
+
+      const waitingClientsToNotify = waitingClientsForStreams.filter((client) =>
+        client.streams.includes(streamName)
+      );
+
+      if (waitingClientsToNotify.length > 0) {
+        waitingClientsToNotify.forEach((client) => {
+          // Clear their timeout if they have one
+          if (client.timeoutId) {
+            clearTimeout(client.timeoutId);
+          }
+
+          // Remove them from waiting list
+          const clientIndex = waitingClientsForStreams.findIndex(
+            (c) => c === client
+          );
+          if (clientIndex !== -1) {
+            waitingClientsForStreams.splice(clientIndex, 1);
+          }
+
+          // Execute XREAD for this client
+          // You can call your existing XREAD logic or create a helper function
+          executeXreadForWaitingClient(client, streamsMap);
+        });
+      }
     }
     if (command?.toUpperCase() === "XRANGE") {
       const streamName = commandArgs[0];
@@ -346,6 +377,11 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       connection.write(`*${outputData.length}\r\n${outputStr}`);
     }
     if (command?.toUpperCase() === "XREAD") {
+      let found = false;
+      const timer =
+        commandArgs[
+          commandArgs.findIndex((item) => item.toUpperCase() === "BLOCK") + 1
+        ];
       const streamsAndIds: string[] = commandArgs.slice(
         commandArgs.findIndex((item) => item.toUpperCase() === "STREAMS") + 1
       );
@@ -366,24 +402,65 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
               : idsArray[index])
         );
 
-        const outputData = streamsMap[streamName]
-          .slice(startIndex)
-          .map((entry) => {
-            const { id, ...fields } = entry; // Extract id and remaining fields
-            const fieldArray = Object.entries(fields).flat(); // Convert fields to flat array
-            return [id, fieldArray];
-          });
+        if (startIndex >= 0) {
+          const outputData = streamsMap[streamName]
+            .slice(startIndex)
+            .map((entry) => {
+              const { id, ...fields } = entry; // Extract id and remaining fields
+              const fieldArray = Object.entries(fields).flat(); // Convert fields to flat array
+              return [id, fieldArray];
+            });
 
-        outputStr += `*${outputData.length}\r\n`;
-        outputData.forEach((item) => {
-          outputStr += `*${item.length}\r\n$${item[0].length}\r\n${item[0]}\r\n*${item[1].length}\r\n`;
-          (item[1] as string[]).forEach((field) => {
-            outputStr += `$${field.length}\r\n${field}\r\n`;
-          });
-        });
+          if (outputData.length > 0) {
+            found = true;
+          }
+
+          if (found) {
+            outputStr += `*${outputData.length}\r\n`;
+            outputData.forEach((item) => {
+              outputStr += `*${item.length}\r\n$${item[0].length}\r\n${item[0]}\r\n*${item[1].length}\r\n`;
+              (item[1] as string[]).forEach((field) => {
+                outputStr += `$${field.length}\r\n${field}\r\n`;
+              });
+            });
+          }
+        }
       });
 
-      connection.write(`${outputStr}`);
+      if (found) {
+        connection.write(`${outputStr}`);
+      }
+
+      if (!found) {
+        const client: {
+          connection: net.Socket;
+          streams: string[];
+          timeout: number;
+          timeoutId: Timer | null;
+        } = {
+          connection: connection,
+          streams: streamArray,
+          timeout: parseFloat(timer),
+          timeoutId: null,
+        };
+
+        waitingClientsForStreams.push(client); // Add to waiting list FIRST
+        if (timer !== "0") {
+          // Then set timeout for non-zero timeouts
+          const timeoutId = setTimeout(() => {
+            // Find and remove this specific client
+            const clientIndex = waitingClientsForStreams.findIndex(
+              (c) => c.connection === connection
+            );
+            if (clientIndex !== -1) {
+              connection.write("*-1\r\n");
+              waitingClientsForStreams.splice(clientIndex, 1);
+            }
+          }, parseFloat(timer));
+
+          client.timeoutId = timeoutId; // Store the timeout ID
+        }
+      }
     }
   });
 });
