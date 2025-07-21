@@ -1,6 +1,5 @@
 import * as net from "net";
 import { parseRespArray } from "./parser";
-import { connect } from "http2";
 
 const map: Record<string, { value: string; expiresAt?: number }> = {};
 const listMap: Record<string, string[]> = {};
@@ -305,10 +304,62 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       }
 
       streamsMap[streamName].push(entry);
-
+      console.log(streamsMap[streamName]);
       connection.write(`$${entry?.id?.length}\r\n${entry?.id}\r\n`);
+    }
+    if (command?.toUpperCase() === "XRANGE") {
+      const streamName = commandArgs[0];
+      const start = commandArgs[1];
+      const end = commandArgs[2];
+
+      const startIndex = streamsMap[streamName].findIndex(
+        (item) => item.id === (!start.split("-")[1] ? `${start}-0` : start)
+      );
+      const endIndex = streamsMap[streamName].findIndex(
+        (item) => item.id === (!end.split("-")[1] ? `${end}-0` : end)
+      );
+
+      const outputData = streamsMap[streamName]
+        .slice(startIndex, endIndex + 1)
+        .map((entry) => {
+          const { id, ...fields } = entry; // Extract id and remaining fields
+          const fieldArray = Object.entries(fields).flat(); // Convert fields to flat array
+          return [id, fieldArray];
+        });
+
+      let outputStr = "";
+
+      outputData.forEach((item) => {
+        outputStr += `*${item.length}\r\n$${item[0].length}\r\n${item[0]}\r\n*${item[1].length}\r\n`;
+        (item[1] as string[]).forEach((field) => {
+          outputStr += `$${field.length}\r\n${field}\r\n`;
+        });
+      });
+
+      connection.write(`*${outputData.length}\r\n${outputStr}`);
     }
   });
 });
 
 server.listen(6379, "127.0.0.1");
+
+// const data = [
+//   { id: "0-2", bar: "baz" },
+//   { id: "0-3", baz: "foo" },
+// ];
+
+// const convertedArray = data.map((entry) => {
+//   const { id, ...fields } = entry; // Extract id and remaining fields
+//   const fieldArray = Object.entries(fields).flat(); // Convert fields to flat array
+//   return [id, fieldArray];
+// });
+// let outputStr = "";
+
+// convertedArray.forEach((item) => {
+//   outputStr += `*${item.length}\r\n`;
+//   (item[1] as string[]).forEach((field) => {
+//     outputStr += `$${field.length}\r\n${field}\r\n`;
+//   });
+// });
+
+// console.log(`*${convertedArray.length}\r\n${outputStr}`);
