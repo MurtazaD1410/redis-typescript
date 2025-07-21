@@ -1,9 +1,10 @@
 import * as net from "net";
 import { parseRespArray } from "./parser";
+import { connect } from "http2";
 
 const map: Record<string, { value: string; expiresAt?: number }> = {};
 const listMap: Record<string, string[]> = {};
-const streamsMap: Record<string, Record<string, string>> = {};
+const streamsMap: Record<string, Array<Record<string, string>>> = {};
 let waitingClients: Array<{
   connection: net.Socket;
   lists: string[];
@@ -250,16 +251,40 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
     if (command?.toUpperCase() === "XADD") {
       const streamName = commandArgs[0];
       if (!streamsMap[streamName]) {
-        streamsMap[streamName] = {};
+        streamsMap[streamName] = [];
       }
       const id = commandArgs[1];
-      streamsMap[streamName]["id"] = id;
-      for (let i = 2; i < commandArgs.length; i = i + 2) {
-        console.log(i);
+      const entry: Record<string, string> = { id: id };
+      for (let i = 2; i < commandArgs.length; i += 2) {
         const key = commandArgs[i];
         const value = commandArgs[i + 1];
-        streamsMap[streamName][key] = value;
+        entry[key] = value;
       }
+      const oldId =
+        streamsMap[streamName][streamsMap[streamName]?.length - 1]?.id;
+      if (id === "0-0") {
+        connection.write(
+          `-ERR The ID specified in XADD must be greater than 0-0\r\n`
+        );
+        return;
+      }
+
+      if (oldId) {
+        const [oldTimestamp, oldSequence] = oldId.split("-").map(Number);
+        const [newTimestamp, newSequence] = entry.id.split("-").map(Number);
+
+        if (
+          newTimestamp < oldTimestamp ||
+          (newTimestamp === oldTimestamp && newSequence <= oldSequence)
+        ) {
+          connection.write(
+            `-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n`
+          );
+          return;
+        }
+      }
+
+      streamsMap[streamName].push(entry);
 
       connection.write(`$${id.length}\r\n${id}\r\n`);
     }
