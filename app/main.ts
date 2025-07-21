@@ -354,10 +354,10 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
 
       const idsArray = streamsAndIds.slice(streamsAndIds.length / 2);
 
-      let outputStr = "";
+      let outputStr = `*${streamArray.length}\r\n`;
 
       streamArray.forEach((streamName, index) => {
-        outputStr += `*${streamArray.length}\r\n*2\r\n$${streamName.length}\r\n${streamName}\r\n`;
+        outputStr += `*2\r\n$${streamName.length}\r\n${streamName}\r\n`;
         const startIndex = streamsMap[streamName].findIndex(
           (item) =>
             item.id >
@@ -382,7 +382,6 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
           });
         });
       });
-      console.log(outputStr);
 
       connection.write(`${outputStr}`);
     }
