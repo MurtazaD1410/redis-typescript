@@ -10,6 +10,7 @@ let waitingClientsForList: Array<{
   lists: string[];
   timeout: number;
   timeoutId: Timer | null;
+  startTime?: number;
 }> = [];
 let waitingClientsForStreams: Array<{
   connection: net.Socket;
@@ -72,26 +73,43 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
 
       if (!listMap[listName]) {
         listMap[listName] = [...commandArgs.slice(1)];
-        connection.write(`:${listMap[listName].length}\r\n`);
       } else {
         listMap[listName].push(...commandArgs.slice(1));
-        connection.write(`:${listMap[listName].length}\r\n`);
       }
+      connection.write(`:${listMap[listName].length}\r\n`);
+      console.log(
+        `RPUSH received for ${listName}. Checking ${waitingClientsForList.length} waiting clients`
+      );
 
-      for (let i = waitingClientsForList.length - 1; i >= 0; i--) {
+      for (let i = 0; i < waitingClientsForList.length; i++) {
         const client = waitingClientsForList[i];
-        if (Date.now() > Date.now() + client.timeout && client.timeout !== 0) {
-          client.connection.write("$-1\r\n");
-          waitingClientsForList.splice(i, 1);
-          break;
-        }
+        console.log(
+          `Checking client ${i}: lists=${client.lists.join(
+            ","
+          )}, looking for ${listName}`
+        );
+
         if (client.lists.includes(listName)) {
+          console.log(`MATCH! Sending response to client ${i}`);
           const poppedElement = listMap[listName].shift();
-          client.connection.write(
-            `*2\r\n$${listName.length}\r\n${listName}\r\n$${poppedElement?.length}\r\n${poppedElement}\r\n`
-          );
+          console.log(`Popped element: ${poppedElement}`);
+
+          const response = `*2\r\n$${listName.length}\r\n${listName}\r\n$${poppedElement?.length}\r\n${poppedElement}\r\n`;
+          console.log(`Sending: ${JSON.stringify(response)}`);
+
+          client.connection.write(response);
+
+          if (client.timeoutId) {
+            clearTimeout(client.timeoutId);
+          }
+
           waitingClientsForList.splice(i, 1);
+          console.log(
+            `Removed client ${i}, remaining: ${waitingClientsForList.length}`
+          );
           break;
+        } else {
+          console.log(`No match for client ${i}`);
         }
       }
     }
@@ -210,17 +228,24 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
           );
         }
       }
+      console.log(
+        `Adding client to waiting list. Total waiting: ${
+          waitingClientsForList.length + 1
+        }`
+      );
       if (!found) {
         const client: {
           connection: net.Socket;
           lists: string[];
           timeout: number;
           timeoutId: Timer | null;
+          startTime?: number;
         } = {
           connection: connection,
           lists: listNames,
           timeout: parseFloat(timer),
           timeoutId: null,
+          startTime: Date.now(),
         };
 
         waitingClientsForList.push(client); // Add to waiting list FIRST
@@ -480,6 +505,27 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
 
           client.timeoutId = timeoutId; // Store the timeout ID
         }
+      }
+    }
+    if (command?.toUpperCase() === "INCR") {
+      const key = commandArgs[0];
+      const item = map[key];
+
+      if (!item) {
+        connection.write(`$-1\r\n`);
+        return;
+      } else if (item.expiresAt && Date.now() > item.expiresAt) {
+        delete map[key];
+        connection.write(`$-1\r\n`);
+        return;
+      } else {
+        const val = (parseInt(map[key].value) + 1).toString();
+        if (val === "NaN") {
+          connection.write(`$-1\r\n`);
+          return;
+        }
+        map[key].value = val;
+        connection.write(`:${map[commandArgs[0]].value}\r\n`);
       }
     }
   });
