@@ -1,6 +1,7 @@
 import * as net from "net";
 import { parseRespArray } from "./parser";
 import { executeXreadForWaitingClient } from "./utils";
+import { connect } from "bun";
 
 const map: Record<string, { value: string; expiresAt?: number }> = {};
 const listMap: Record<string, string[]> = {};
@@ -528,6 +529,9 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         map[key].value = val;
         connection.write(`:${map[commandArgs[0]].value}\r\n`);
       }
+    }
+    if (command?.toUpperCase() === "MULTI") {
+      connection.write("+OK\r\n");
     }
   });
 });
