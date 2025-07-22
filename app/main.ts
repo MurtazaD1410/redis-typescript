@@ -522,7 +522,7 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       } else {
         const val = (parseInt(map[key].value) + 1).toString();
         if (val === "NaN") {
-          connection.write(`$-1\r\n`);
+          connection.write(`-ERR value is not an integer or out of range\r\n`);
           return;
         }
         map[key].value = val;
