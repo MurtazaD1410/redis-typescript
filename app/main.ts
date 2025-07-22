@@ -629,4 +629,20 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
   });
 });
 
-server.listen(6379, "127.0.0.1");
+// Get port from CLI argument like --port 6380
+function getPortFromArgs(defaultPort = 6379): number {
+  const portFlagIndex = process.argv.indexOf("--port");
+  if (portFlagIndex !== -1 && process.argv[portFlagIndex + 1]) {
+    const port = parseInt(process.argv[portFlagIndex + 1], 10);
+    if (!isNaN(port)) {
+      return port;
+    }
+  }
+  return defaultPort;
+}
+
+const PORT = getPortFromArgs();
+
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
