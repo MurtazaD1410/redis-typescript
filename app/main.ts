@@ -512,7 +512,8 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       const item = map[key];
 
       if (!item) {
-        connection.write(`$-1\r\n`);
+        map[key] = { value: "1" };
+        connection.write(`:${map[key].value}\r\n`);
         return;
       } else if (item.expiresAt && Date.now() > item.expiresAt) {
         delete map[key];
