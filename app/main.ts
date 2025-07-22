@@ -538,53 +538,6 @@ function executeCommand(
     clientTransactions.set(connection, { inTransaction: true, queue: [] });
     connection.write("+OK\r\n");
   }
-  // if (command?.toUpperCase() === "EXEC") {
-  //   const results: string[] = [];
-
-  //   // For each queued command, capture its response
-  //   for (let index = 1; index < multiExec.length; index++) {
-  //     const element = multiExec[index];
-  //     const { command: queuedCommand, commandArgs: queuedArgs } =
-  //       parseRespArray(element);
-
-  //     // Create a temporary variable to capture the response
-  //     let capturedResponse = "";
-
-  //     // Temporarily override connection.write to capture the response
-  //     const originalWrite = connection.write;
-  //     connection.write = (data: string) => {
-  //       capturedResponse = data;
-  //       return true; // connection.write returns boolean
-  //     };
-
-  //     // Execute the command (it will "write" to our captured variable)
-  //     executeCommand(
-  //       queuedCommand,
-  //       queuedArgs,
-  //       connection,
-  //       map,
-  //       listMap,
-  //       streamsMap,
-  //       waitingClientsForStreams,
-  //       waitingClientsForList
-  //     );
-
-  //     // Restore original write function
-  //     connection.write = originalWrite;
-
-  //     // Store the captured response
-  //     results.push(capturedResponse);
-  //   }
-
-  //   // Send all results as a Redis array
-  //   let response = `*${results.length}\r\n`;
-  //   results.forEach((result) => {
-  //     response += result;
-  //   });
-
-  //   connection.write(response);
-  //   multiExec.length = 0;
-  // }
   if (command?.toUpperCase() === "EXEC") {
     const clientState = clientTransactions.get(connection);
     if (!clientState?.inTransaction) {
@@ -637,6 +590,22 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       connection.write("-ERR EXEC without MULTI\r\n");
       return;
     }
+    if (
+      command.toUpperCase() === "DISCARD" &&
+      clientTransactions.get(connection)?.inTransaction
+    ) {
+      clientTransactions.set(connection, { inTransaction: false, queue: [] });
+      connection.write("+OK\r\n");
+      return;
+    }
+    if (
+      command.toUpperCase() === "DISCARD" &&
+      !clientTransactions.get(connection)?.inTransaction
+    ) {
+      connection.write("-ERR DISCARD without MULTI\r\n");
+      return;
+    }
+
     if (clientState?.inTransaction && command.toUpperCase() !== "EXEC") {
       clientState.queue.push(data.toString());
       connection.write(`+QUEUED\r\n`);
