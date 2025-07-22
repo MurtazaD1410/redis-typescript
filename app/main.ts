@@ -1,7 +1,6 @@
 import * as net from "net";
 import { parseRespArray } from "./parser";
 import { executeXreadForWaitingClient } from "./utils";
-import { connect } from "bun";
 
 const map: Record<string, { value: string; expiresAt?: number }> = {};
 const listMap: Record<string, string[]> = {};
@@ -21,7 +20,10 @@ let waitingClientsForStreams: Array<{
   timeoutId: Timer | null;
 }> = [];
 
-const multiExec: string[] = [];
+const clientTransactions: Map<
+  net.Socket,
+  { inTransaction: boolean; queue: string[] }
+> = new Map();
 
 function executeCommand(
   command: string,
@@ -95,25 +97,14 @@ function executeCommand(
       listMap[listName].push(...commandArgs.slice(1));
     }
     connection.write(`:${listMap[listName].length}\r\n`);
-    console.log(
-      `RPUSH received for ${listName}. Checking ${waitingClientsForList.length} waiting clients`
-    );
 
     for (let i = 0; i < waitingClientsForList.length; i++) {
       const client = waitingClientsForList[i];
-      console.log(
-        `Checking client ${i}: lists=${client.lists.join(
-          ","
-        )}, looking for ${listName}`
-      );
 
       if (client.lists.includes(listName)) {
-        console.log(`MATCH! Sending response to client ${i}`);
         const poppedElement = listMap[listName].shift();
-        console.log(`Popped element: ${poppedElement}`);
 
         const response = `*2\r\n$${listName.length}\r\n${listName}\r\n$${poppedElement?.length}\r\n${poppedElement}\r\n`;
-        console.log(`Sending: ${JSON.stringify(response)}`);
 
         client.connection.write(response);
 
@@ -122,12 +113,9 @@ function executeCommand(
         }
 
         waitingClientsForList.splice(i, 1);
-        console.log(
-          `Removed client ${i}, remaining: ${waitingClientsForList.length}`
-        );
+
         break;
       } else {
-        console.log(`No match for client ${i}`);
       }
     }
   }
@@ -176,20 +164,24 @@ function executeCommand(
       connection.write(`:${listMap[listName].length}\r\n`);
     }
 
-    for (let i = waitingClientsForList.length - 1; i >= 0; i--) {
+    for (let i = 0; i < waitingClientsForList.length; i++) {
       const client = waitingClientsForList[i];
-      if (Date.now() > Date.now() + client.timeout && client.timeout !== 0) {
-        client.connection.write("$-1\r\n");
-        waitingClientsForList.splice(i, 1);
-        break;
-      }
+
       if (client.lists.includes(listName)) {
         const poppedElement = listMap[listName].shift();
-        client.connection.write(
-          `*2\r\n$${listName.length}\r\n${listName}\r\n$${poppedElement?.length}\r\n${poppedElement}\r\n`
-        );
-        waitingClientsForList.splice(i, 1); // Remove from waiting list
-        break; // Only wake up one client!
+
+        const response = `*2\r\n$${listName.length}\r\n${listName}\r\n$${poppedElement?.length}\r\n${poppedElement}\r\n`;
+
+        client.connection.write(response);
+
+        if (client.timeoutId) {
+          clearTimeout(client.timeoutId);
+        }
+
+        waitingClientsForList.splice(i, 1);
+
+        break;
+      } else {
       }
     }
   }
@@ -246,11 +238,7 @@ function executeCommand(
         );
       }
     }
-    console.log(
-      `Adding client to waiting list. Total waiting: ${
-        waitingClientsForList.length + 1
-      }`
-    );
+
     if (!found) {
       const client: {
         connection: net.Socket;
@@ -547,18 +535,32 @@ function executeCommand(
     }
   }
   if (command?.toUpperCase() === "MULTI") {
-    multiExec.push(command);
+    clientTransactions.set(connection, { inTransaction: true, queue: [] });
     connection.write("+OK\r\n");
   }
   // if (command?.toUpperCase() === "EXEC") {
+  //   const results: string[] = [];
+
+  //   // For each queued command, capture its response
   //   for (let index = 1; index < multiExec.length; index++) {
   //     const element = multiExec[index];
+  //     const { command: queuedCommand, commandArgs: queuedArgs } =
+  //       parseRespArray(element);
 
-  //     const { command, commandArgs } = parseRespArray(element);
+  //     // Create a temporary variable to capture the response
+  //     let capturedResponse = "";
 
+  //     // Temporarily override connection.write to capture the response
+  //     const originalWrite = connection.write;
+  //     connection.write = (data: string) => {
+  //       capturedResponse = data;
+  //       return true; // connection.write returns boolean
+  //     };
+
+  //     // Execute the command (it will "write" to our captured variable)
   //     executeCommand(
-  //       command,
-  //       commandArgs,
+  //       queuedCommand,
+  //       queuedArgs,
   //       connection,
   //       map,
   //       listMap,
@@ -566,30 +568,39 @@ function executeCommand(
   //       waitingClientsForStreams,
   //       waitingClientsForList
   //     );
+
+  //     // Restore original write function
+  //     connection.write = originalWrite;
+
+  //     // Store the captured response
+  //     results.push(capturedResponse);
   //   }
 
+  //   // Send all results as a Redis array
+  //   let response = `*${results.length}\r\n`;
+  //   results.forEach((result) => {
+  //     response += result;
+  //   });
+
+  //   connection.write(response);
   //   multiExec.length = 0;
   // }
   if (command?.toUpperCase() === "EXEC") {
+    const clientState = clientTransactions.get(connection);
+    if (!clientState?.inTransaction) {
+      connection.write("-ERR EXEC without MULTI\r\n");
+      return;
+    }
     const results: string[] = [];
-
-    // For each queued command, capture its response
-    for (let index = 1; index < multiExec.length; index++) {
-      const element = multiExec[index];
+    for (const queuedData of clientState.queue) {
       const { command: queuedCommand, commandArgs: queuedArgs } =
-        parseRespArray(element);
-
-      // Create a temporary variable to capture the response
+        parseRespArray(queuedData);
       let capturedResponse = "";
-
-      // Temporarily override connection.write to capture the response
       const originalWrite = connection.write;
       connection.write = (data: string) => {
         capturedResponse = data;
-        return true; // connection.write returns boolean
+        return true;
       };
-
-      // Execute the command (it will "write" to our captured variable)
       executeCommand(
         queuedCommand,
         queuedArgs,
@@ -600,39 +611,34 @@ function executeCommand(
         waitingClientsForStreams,
         waitingClientsForList
       );
-
-      // Restore original write function
       connection.write = originalWrite;
-
-      // Store the captured response
       results.push(capturedResponse);
     }
-
-    // Send all results as a Redis array
     let response = `*${results.length}\r\n`;
     results.forEach((result) => {
       response += result;
     });
-
     connection.write(response);
-    multiExec.length = 0;
+    clientTransactions.set(connection, { inTransaction: false, queue: [] });
   }
 }
 
-// You can use print statements as follows for debugging, they'll be visible when running tests.
 console.log("Logs from your program will appear here!");
 
 const server: net.Server = net.createServer((connection: net.Socket) => {
-  // Handle connection
+  clientTransactions.set(connection, { inTransaction: false, queue: [] });
   connection.on("data", (data) => {
     const { command, commandArgs } = parseRespArray(data.toString());
-    if (command.toUpperCase() === "EXEC" && multiExec.length === 0) {
+    const clientState = clientTransactions.get(connection);
+    if (
+      command.toUpperCase() === "EXEC" &&
+      !clientTransactions.get(connection)?.inTransaction
+    ) {
       connection.write("-ERR EXEC without MULTI\r\n");
       return;
     }
-    if (multiExec.length > 0 && command.toUpperCase() !== "EXEC") {
-      multiExec.push(data.toString());
-      console.log(multiExec);
+    if (clientState?.inTransaction && command.toUpperCase() !== "EXEC") {
+      clientState.queue.push(data.toString());
       connection.write(`+QUEUED\r\n`);
       return;
     }
@@ -647,6 +653,10 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       waitingClientsForStreams,
       waitingClientsForList
     );
+  });
+
+  connection.on("close", () => {
+    clientTransactions.delete(connection);
   });
 });
 
