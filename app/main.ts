@@ -14,6 +14,7 @@ let waitingClientsForList: Array<{
 let waitingClientsForStreams: Array<{
   connection: net.Socket;
   streams: string[];
+  idsArray: string[];
   timeout: number;
   timeoutId: Timer | null;
 }> = [];
@@ -392,17 +393,34 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
 
       let outputStr = `*${streamArray.length}\r\n`;
 
+      const processedIds = idsArray.map((item, index) => {
+        if (item === "$") {
+          const latestId =
+            streamsMap?.[streamArray[index]]?.[
+              streamsMap[streamArray[index]]?.length - 1
+            ]?.id;
+
+          if (!latestId) {
+            return "0-0";
+          } else {
+            return latestId;
+          }
+        } else {
+          return item;
+        }
+      });
+
       streamArray.forEach((streamName, index) => {
         outputStr += `*2\r\n$${streamName.length}\r\n${streamName}\r\n`;
-        const startIndex = streamsMap[streamName].findIndex(
+        const startIndex = streamsMap[streamName]?.findIndex(
           (item) =>
             item.id >
-            (!idsArray[index].split("-")[1]
-              ? `${idsArray[index]}-0`
-              : idsArray[index])
+            (!processedIds[index].split("-")[1]
+              ? `${processedIds[index]}-0`
+              : processedIds[index])
         );
 
-        if (startIndex >= 0) {
+        if (startIndex !== undefined && startIndex >= 0) {
           const outputData = streamsMap[streamName]
             .slice(startIndex)
             .map((entry) => {
@@ -436,10 +454,12 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
           connection: net.Socket;
           streams: string[];
           timeout: number;
+          idsArray: string[];
           timeoutId: Timer | null;
         } = {
           connection: connection,
           streams: streamArray,
+          idsArray: processedIds,
           timeout: parseFloat(timer),
           timeoutId: null,
         };
