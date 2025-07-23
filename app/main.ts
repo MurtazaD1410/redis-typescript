@@ -7,6 +7,7 @@ import { set } from "./commands/set";
 import type {
   ListMapType,
   MapType,
+  RoleConfig,
   StreamsMapType,
   WaitingClientsForListType,
   WaitingClientsForStreamsType,
@@ -108,7 +109,7 @@ export function executeCommand(
     );
   }
   if (command?.toUpperCase() === "INFO") {
-    info(connection, commandArgs, role);
+    info(connection, commandArgs, roleConfig);
   }
 }
 
@@ -178,18 +179,38 @@ function getPortFromArgs(defaultPort = 6379): number {
   return defaultPort;
 }
 
-function getRoleFromArgs(defaultRole = "master"): string {
+function getRoleFromArgs(): RoleConfig {
   const roleFlagIndex = process.argv.indexOf("--replicaof");
-
   if (roleFlagIndex !== -1 && process.argv[roleFlagIndex + 1]) {
-    return "slave";
+    const [host, portStr] = process.argv[roleFlagIndex + 1].split(" ");
+    if (host && !isNaN(parseInt(portStr, 10))) {
+      return {
+        role: "slave",
+        masterHost: host,
+        masterPort: parseInt(portStr, 10),
+      };
+    }
   }
-  return defaultRole;
+  return { role: "master" };
 }
 
-const role = getRoleFromArgs();
+const roleConfig = getRoleFromArgs();
 const PORT = getPortFromArgs();
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  if (
+    roleConfig.role === "slave" &&
+    roleConfig.masterHost &&
+    roleConfig.masterPort
+  ) {
+    const masterClient = net.createConnection({
+      host: roleConfig.masterHost,
+      port: roleConfig.masterPort,
+    });
+
+    masterClient.on("connect", () => {
+      masterClient.write("*1\r\n$4\r\nPING\r\n");
+    });
+  }
 });

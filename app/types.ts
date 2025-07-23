@@ -24,3 +24,9 @@ export type ClientTransactionsType = Map<
   net.Socket,
   { inTransaction: boolean; queue: string[] }
 >;
+
+export type RoleConfig = {
+  role: "master" | "slave";
+  masterHost?: string;
+  masterPort?: number;
+};
