@@ -123,8 +123,6 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       if (response === "*1\r\n$4\r\nPING\r\n") {
         console.log("Received PONG from master");
         // Optionally proceed to next steps or close the socket for this stage
-      } else {
-        console.error("Unexpected response from master:", response);
       }
     }
     const { command, commandArgs } = parseRespArray(data.toString());
@@ -133,7 +131,15 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         connection.write("+OK\r\n");
         return;
       }
+
+      if (command.toUpperCase() === "PSYNC") {
+        connection.write(
+          "+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n"
+        );
+        return;
+      }
     }
+
     const clientState = clientTransactions.get(connection);
     if (
       command.toUpperCase() === "EXEC" &&
@@ -232,8 +238,6 @@ server.listen(PORT, () => {
     });
 
     masterClient.on("data", (data) => {
-      console.log("Received from master:", data.toString());
-
       if (handshakeStep === 1) {
         // Should receive PONG
         if (data.toString().includes("PONG")) {
