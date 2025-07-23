@@ -1,14 +1,8 @@
-import * as net from "net";
+import type { StreamsMapType, WaitingClientForStreamsType } from "./types";
 
 export function executeXreadForWaitingClient(
-  client: {
-    connection: net.Socket;
-    streams: string[];
-    timeout: number;
-    idsArray: string[];
-    timeoutId: Timer | null;
-  },
-  streamsMap: Record<string, Array<Record<string, string>>>
+  client: WaitingClientForStreamsType,
+  streamsMap: StreamsMapType
 ) {
   const streamArray = client.streams;
 
@@ -29,8 +23,8 @@ export function executeXreadForWaitingClient(
       const outputData = streamsMap[streamName]
         .slice(startIndex)
         .map((entry) => {
-          const { id, ...fields } = entry; // Extract id and remaining fields
-          const fieldArray = Object.entries(fields).flat(); // Convert fields to flat array
+          const { id, ...fields } = entry;
+          const fieldArray = Object.entries(fields).flat();
           return [id, fieldArray];
         });
 
