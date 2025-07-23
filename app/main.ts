@@ -47,6 +47,7 @@ function executeCommand(
     startTime?: number;
   }>
 ) {
+  console.log("executing command");
   if (command?.toUpperCase() === "PING") {
     connection.write(`+PONG\r\n`);
   }
@@ -574,6 +575,17 @@ function executeCommand(
     connection.write(response);
     clientTransactions.set(connection, { inTransaction: false, queue: [] });
   }
+  if (command?.toUpperCase() === "INFO") {
+    switch (commandArgs[0]?.toUpperCase()) {
+      case "REPLICATION":
+        console.log("inside replication");
+        connection.write(`$11\r\nrole:master\r\n`);
+        break;
+      default:
+        connection.write(`$0\r\n`);
+        break;
+    }
+  }
 }
 
 console.log("Logs from your program will appear here!");
@@ -582,6 +594,7 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
   clientTransactions.set(connection, { inTransaction: false, queue: [] });
   connection.on("data", (data) => {
     const { command, commandArgs } = parseRespArray(data.toString());
+    console.log(command, commandArgs);
     const clientState = clientTransactions.get(connection);
     if (
       command.toUpperCase() === "EXEC" &&
