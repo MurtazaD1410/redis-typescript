@@ -118,8 +118,22 @@ console.log("Logs from your program will appear here!");
 const server: net.Server = net.createServer((connection: net.Socket) => {
   clientTransactions.set(connection, { inTransaction: false, queue: [] });
   connection.on("data", (data) => {
+    if (roleConfig.role === "master") {
+      const response = data.toString();
+      if (response === "*1\r\n$4\r\nPING\r\n") {
+        console.log("Received PONG from master");
+        // Optionally proceed to next steps or close the socket for this stage
+      } else {
+        console.error("Unexpected response from master:", response);
+      }
+    }
     const { command, commandArgs } = parseRespArray(data.toString());
-    console.log(command, commandArgs);
+    if (roleConfig.role === "master") {
+      if (command.toUpperCase() === "REPLCONF") {
+        connection.write("+OK\r\n");
+        return;
+      }
+    }
     const clientState = clientTransactions.get(connection);
     if (
       command.toUpperCase() === "EXEC" &&
@@ -209,8 +223,44 @@ server.listen(PORT, () => {
       port: roleConfig.masterPort,
     });
 
+    let handshakeStep = 0;
+
     masterClient.on("connect", () => {
+      // Step 1: Send PING
       masterClient.write("*1\r\n$4\r\nPING\r\n");
+      handshakeStep = 1;
+    });
+
+    masterClient.on("data", (data) => {
+      console.log("Received from master:", data.toString());
+
+      if (handshakeStep === 1) {
+        // Should receive PONG
+        if (data.toString().includes("PONG")) {
+          // Step 2: Send REPLCONF listening-port
+          masterClient.write(
+            `*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n${PORT}\r\n`
+          );
+          handshakeStep = 2;
+        }
+      } else if (handshakeStep === 2) {
+        // Should receive OK
+        if (data.toString().includes("OK")) {
+          // Step 3: Send REPLCONF capa (capabilities)
+          masterClient.write(
+            "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
+          );
+          handshakeStep = 3;
+        }
+      } else if (handshakeStep === 3) {
+        // Should receive OK
+        if (data.toString().includes("OK")) {
+          // Step 4: Send PSYNC (partial sync)
+          masterClient.write("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n");
+          handshakeStep = 4;
+        }
+      }
+      // After PSYNC, you'll receive the RDB snapshot and then start receiving commands
     });
   }
 });
