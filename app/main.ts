@@ -133,9 +133,17 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       }
 
       if (command.toUpperCase() === "PSYNC") {
+        const emptyRdb = Buffer.from(
+          "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2",
+          "hex"
+        );
         connection.write(
           "+FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0\r\n"
         );
+
+        connection.write(`$${emptyRdb.length}\r\n`);
+        connection.write(emptyRdb as unknown as Uint8Array);
+
         return;
       }
     }
@@ -264,7 +272,6 @@ server.listen(PORT, () => {
           handshakeStep = 4;
         }
       }
-      // After PSYNC, you'll receive the RDB snapshot and then start receiving commands
     });
   }
 });
