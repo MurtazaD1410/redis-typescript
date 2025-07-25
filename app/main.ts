@@ -1,6 +1,5 @@
 import * as net from "net";
 import { parseRespArray } from "./parser";
-import { executeXreadForWaitingClient } from "./utils";
 import { ping } from "./commands/ping";
 import { echo } from "./commands/echo";
 import { set } from "./commands/set";
@@ -28,6 +27,7 @@ import { multi } from "./commands/multi";
 import { exec } from "./commands/exec";
 import { info } from "./commands/info";
 
+const slaves: Array<net.Socket> = [];
 const map: MapType = {};
 const listMap: ListMapType = {};
 const streamsMap: StreamsMapType = {};
@@ -40,6 +40,7 @@ const clientTransactions: Map<
 > = new Map();
 
 export function executeCommand(
+  stringCommand: string,
   command: string,
   commandArgs: string[],
   connection: net.Socket,
@@ -47,7 +48,8 @@ export function executeCommand(
   listMap: ListMapType,
   streamsMap: StreamsMapType,
   waitingClientsForStreams: WaitingClientsForStreamsType,
-  waitingClientsForList: WaitingClientsForListType
+  waitingClientsForList: WaitingClientsForListType,
+  roleConfig: RoleConfig
 ) {
   if (command?.toUpperCase() === "PING") {
     ping(connection);
@@ -56,7 +58,7 @@ export function executeCommand(
     echo(connection, commandArgs);
   }
   if (command?.toUpperCase() === "SET") {
-    set(connection, commandArgs, map);
+    set(connection, commandArgs, map, slaves);
   }
   if (command?.toUpperCase() === "GET") {
     get(connection, commandArgs, map);
@@ -99,13 +101,15 @@ export function executeCommand(
   }
   if (command?.toUpperCase() === "EXEC") {
     exec(
+      stringCommand,
       connection,
       clientTransactions,
       map,
       listMap,
       streamsMap,
       waitingClientsForStreams,
-      waitingClientsForList
+      waitingClientsForList,
+      roleConfig
     );
   }
   if (command?.toUpperCase() === "INFO") {
@@ -118,6 +122,10 @@ console.log("Logs from your program will appear here!");
 const server: net.Server = net.createServer((connection: net.Socket) => {
   clientTransactions.set(connection, { inTransaction: false, queue: [] });
   connection.on("data", (data) => {
+    if (roleConfig.role === "slave") {
+      console.log(data.toString());
+    }
+
     if (roleConfig.role === "master") {
       const response = data.toString();
       if (response === "*1\r\n$4\r\nPING\r\n") {
@@ -143,6 +151,15 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
 
         connection.write(`$${emptyRdb.length}\r\n`);
         connection.write(emptyRdb as unknown as Uint8Array);
+        slaves.push(connection);
+
+        // Clean up when slave disconnects
+        connection.on("close", () => {
+          const index = slaves.indexOf(connection);
+          if (index > -1) {
+            slaves.splice(index, 1);
+          }
+        });
 
         return;
       }
@@ -179,6 +196,7 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
     }
 
     executeCommand(
+      data.toString(),
       command,
       commandArgs,
       connection,
@@ -186,7 +204,8 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       listMap,
       streamsMap,
       waitingClientsForStreams,
-      waitingClientsForList
+      waitingClientsForList,
+      roleConfig
     );
   });
 

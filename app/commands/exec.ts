@@ -5,19 +5,22 @@ import type {
   Connection,
   ListMapType,
   MapType,
+  RoleConfig,
   StreamsMapType,
   WaitingClientsForListType,
   WaitingClientsForStreamsType,
 } from "../types";
 
 export const exec = (
+  stringCommand: string,
   connection: Connection,
   clientTransactions: ClientTransactionsType,
   map: MapType,
   listMap: ListMapType,
   streamsMap: StreamsMapType,
   waitingClientsForStreams: WaitingClientsForStreamsType,
-  waitingClientsForList: WaitingClientsForListType
+  waitingClientsForList: WaitingClientsForListType,
+  roleConfig: RoleConfig
 ) => {
   const clientState = clientTransactions.get(connection);
   if (!clientState?.inTransaction) {
@@ -35,6 +38,7 @@ export const exec = (
       return true;
     };
     executeCommand(
+      stringCommand,
       queuedCommand,
       queuedArgs,
       connection,
@@ -42,7 +46,8 @@ export const exec = (
       listMap,
       streamsMap,
       waitingClientsForStreams,
-      waitingClientsForList
+      waitingClientsForList,
+      roleConfig
     );
     connection.write = originalWrite;
     results.push(capturedResponse);
