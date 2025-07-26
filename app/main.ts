@@ -58,7 +58,7 @@ export function executeCommand(
     echo(connection, commandArgs);
   }
   if (command?.toUpperCase() === "SET") {
-    set(connection, commandArgs, map, slaves);
+    set(connection, commandArgs, map, slaves, roleConfig);
   }
   if (command?.toUpperCase() === "GET") {
     get(connection, commandArgs, map);
@@ -122,9 +122,7 @@ console.log("Logs from your program will appear here!");
 const server: net.Server = net.createServer((connection: net.Socket) => {
   clientTransactions.set(connection, { inTransaction: false, queue: [] });
   connection.on("data", (data) => {
-    if (roleConfig.role === "slave") {
-      console.log(data.toString());
-    }
+    const { command, commandArgs } = parseRespArray(data.toString());
 
     if (roleConfig.role === "master") {
       const response = data.toString();
@@ -133,14 +131,13 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         // Optionally proceed to next steps or close the socket for this stage
       }
     }
-    const { command, commandArgs } = parseRespArray(data.toString());
     if (roleConfig.role === "master") {
-      if (command.toUpperCase() === "REPLCONF") {
+      if (command?.toUpperCase() === "REPLCONF") {
         connection.write("+OK\r\n");
         return;
       }
 
-      if (command.toUpperCase() === "PSYNC") {
+      if (command?.toUpperCase() === "PSYNC") {
         const emptyRdb = Buffer.from(
           "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2",
           "hex"
@@ -167,14 +164,14 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
 
     const clientState = clientTransactions.get(connection);
     if (
-      command.toUpperCase() === "EXEC" &&
+      command?.toUpperCase() === "EXEC" &&
       !clientTransactions.get(connection)?.inTransaction
     ) {
       connection.write("-ERR EXEC without MULTI\r\n");
       return;
     }
     if (
-      command.toUpperCase() === "DISCARD" &&
+      command?.toUpperCase() === "DISCARD" &&
       clientTransactions.get(connection)?.inTransaction
     ) {
       clientTransactions.set(connection, { inTransaction: false, queue: [] });
@@ -182,14 +179,14 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
       return;
     }
     if (
-      command.toUpperCase() === "DISCARD" &&
+      command?.toUpperCase() === "DISCARD" &&
       !clientTransactions.get(connection)?.inTransaction
     ) {
       connection.write("-ERR DISCARD without MULTI\r\n");
       return;
     }
 
-    if (clientState?.inTransaction && command.toUpperCase() !== "EXEC") {
+    if (clientState?.inTransaction && command?.toUpperCase() !== "EXEC") {
       clientState.queue.push(data.toString());
       connection.write(`+QUEUED\r\n`);
       return;
@@ -246,6 +243,53 @@ const PORT = getPortFromArgs();
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+  // if (
+  //   roleConfig.role === "slave" &&
+  //   roleConfig.masterHost &&
+  //   roleConfig.masterPort
+  // ) {
+  //   const masterClient = net.createConnection({
+  //     host: roleConfig.masterHost,
+  //     port: roleConfig.masterPort,
+  //   });
+
+  //   let handshakeStep = 0;
+
+  //   masterClient.on("connect", () => {
+  //     // Step 1: Send PING
+  //     masterClient.write("*1\r\n$4\r\nPING\r\n");
+  //     handshakeStep = 1;
+  //   });
+
+  //   masterClient.on("data", (data) => {
+  //     if (handshakeStep === 1) {
+  //       // Should receive PONG
+  //       if (data.toString().includes("PONG")) {
+  //         // Step 2: Send REPLCONF listening-port
+  //         masterClient.write(
+  //           `*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n${PORT}\r\n`
+  //         );
+  //         handshakeStep = 2;
+  //       }
+  //     } else if (handshakeStep === 2) {
+  //       // Should receive OK
+  //       if (data.toString().includes("OK")) {
+  //         // Step 3: Send REPLCONF capa (capabilities)
+  //         masterClient.write(
+  //           "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
+  //         );
+  //         handshakeStep = 3;
+  //       }
+  //     } else if (handshakeStep === 3) {
+  //       // Should receive OK
+  //       if (data.toString().includes("OK")) {
+  //         // Step 4: Send PSYNC (partial sync)
+  //         masterClient.write("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n");
+  //         handshakeStep = 4;
+  //       }
+  //     }
+  //   });
+  // }
   if (
     roleConfig.role === "slave" &&
     roleConfig.masterHost &&
@@ -257,40 +301,146 @@ server.listen(PORT, () => {
     });
 
     let handshakeStep = 0;
+    let handshakeComplete = false;
+    let rdbReceived = false;
 
     masterClient.on("connect", () => {
+      console.log("Connected to master");
       // Step 1: Send PING
       masterClient.write("*1\r\n$4\r\nPING\r\n");
       handshakeStep = 1;
     });
 
     masterClient.on("data", (data) => {
-      if (handshakeStep === 1) {
-        // Should receive PONG
-        if (data.toString().includes("PONG")) {
-          // Step 2: Send REPLCONF listening-port
-          masterClient.write(
-            `*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n${PORT}\r\n`
-          );
-          handshakeStep = 2;
+      if (!handshakeComplete) {
+        console.log(
+          "Handshake data received:",
+          data.toString().replace(/\r\n/g, "\\r\\n")
+        );
+
+        if (handshakeStep === 1) {
+          // Should receive PONG
+          if (data.toString().includes("PONG")) {
+            console.log("✅ Received PONG, sending REPLCONF listening-port");
+            masterClient.write(
+              `*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n${PORT}\r\n`
+            );
+            handshakeStep = 2;
+          }
+        } else if (handshakeStep === 2) {
+          // Should receive OK
+          if (data.toString().includes("OK")) {
+            console.log(
+              "✅ Received OK for listening-port, sending REPLCONF capa"
+            );
+            masterClient.write(
+              "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
+            );
+            handshakeStep = 3;
+          }
+        } else if (handshakeStep === 3) {
+          // Should receive OK
+          if (data.toString().includes("OK")) {
+            console.log("✅ Received OK for capa, sending PSYNC");
+            masterClient.write("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n");
+            handshakeStep = 4;
+          }
+        } else if (handshakeStep === 4) {
+          // Should receive FULLRESYNC and RDB data
+          const dataStr = data.toString();
+          if (dataStr.includes("FULLRESYNC")) {
+            console.log("✅ Received FULLRESYNC");
+
+            // Check if RDB data is in the same packet
+            const lines = dataStr.split("\r\n");
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].startsWith("$")) {
+                // This is the RDB size indicator
+                console.log("✅ RDB data received, handshake complete!");
+                handshakeComplete = true;
+                rdbReceived = true;
+                break;
+              }
+            }
+          } else if (!rdbReceived) {
+            // This might be just the RDB data
+            console.log("✅ RDB data received, handshake complete!");
+            handshakeComplete = true;
+            rdbReceived = true;
+          }
         }
-      } else if (handshakeStep === 2) {
-        // Should receive OK
-        if (data.toString().includes("OK")) {
-          // Step 3: Send REPLCONF capa (capabilities)
-          masterClient.write(
-            "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
+      } else {
+        // Handshake is complete, handle propagated commands
+        console.log("🚀 PROPAGATED COMMAND RECEIVED 🚀");
+        console.log("Raw data:", data.toString().replace(/\r\n/g, "\\r\\n"));
+
+        try {
+          const dataStr = data.toString();
+
+          // Handle multiple commands in one packet
+          const commands = dataStr
+            .split("*")
+            .filter((cmd) => cmd.trim() !== "");
+
+          for (const cmdStr of commands) {
+            const fullCommand = "*" + cmdStr;
+            console.log(
+              "Processing command:",
+              fullCommand.replace(/\r\n/g, "\\r\\n")
+            );
+
+            try {
+              const { command, commandArgs } = parseRespArray(fullCommand);
+
+              if (command && command.trim() !== "") {
+                console.log(
+                  `⚡ Executing on slave: ${command} [${commandArgs.join(
+                    ", "
+                  )}]`
+                );
+
+                // Execute the command on slave's data structures
+                executeCommand(
+                  fullCommand,
+                  command,
+                  commandArgs,
+                  masterClient, // Use masterClient as the connection (though it won't send responses)
+                  map,
+                  listMap,
+                  streamsMap,
+                  waitingClientsForStreams,
+                  waitingClientsForList,
+                  roleConfig
+                );
+
+                console.log(
+                  `✅ Command ${command} executed successfully on slave`
+                );
+              }
+            } catch (parseError) {
+              console.error("Error parsing individual command:", parseError);
+              console.error(
+                "Command string was:",
+                fullCommand.replace(/\r\n/g, "\\r\\n")
+              );
+            }
+          }
+        } catch (error) {
+          console.error("Error processing propagated commands:", error);
+          console.error(
+            "Raw data was:",
+            data.toString().replace(/\r\n/g, "\\r\\n")
           );
-          handshakeStep = 3;
-        }
-      } else if (handshakeStep === 3) {
-        // Should receive OK
-        if (data.toString().includes("OK")) {
-          // Step 4: Send PSYNC (partial sync)
-          masterClient.write("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n");
-          handshakeStep = 4;
         }
       }
+    });
+
+    masterClient.on("error", (error) => {
+      console.error("❌ Master connection error:", error);
+    });
+
+    masterClient.on("close", () => {
+      console.log("❌ Master connection closed");
     });
   }
 });

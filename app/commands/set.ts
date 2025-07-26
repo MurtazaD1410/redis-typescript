@@ -1,10 +1,11 @@
-import type { Connection, MapType } from "../types";
+import type { Connection, MapType, RoleConfig } from "../types";
 
 export const set = (
   connection: Connection,
   commandArgs: string[],
   map: MapType,
-  slaves: Connection[]
+  slaves: Connection[],
+  roleConfig: RoleConfig
 ) => {
   const key = commandArgs[0];
   const value = commandArgs[1];
@@ -18,15 +19,20 @@ export const set = (
     }
   }
 
-  connection.write(`+OK\r\n`);
+  if (!roleConfig || roleConfig.role === "master") {
+    connection.write(`+OK\r\n`);
 
-  const setCommand = `*3\r\n$3\r\nSET\r\n$${key.length}\r\n${key}\r\n$${value.length}\r\n${value}\r\n`;
-  slaves.forEach((slave) => {
-    console.log("in slave");
-    if (slave.writable) {
-      console.log("in slave write", setCommand);
-
-      slave.write(setCommand);
-    }
-  });
+    // Propagate to slaves (only if we're the master)
+    const setCommand = `*3\r\n$3\r\nSET\r\n$${key.length}\r\n${key}\r\n$${value.length}\r\n${value}\r\n`;
+    slaves.forEach((slave) => {
+      console.log("Propagating to slave");
+      if (slave.writable) {
+        console.log("Writing to slave:", setCommand.replace(/\r\n/g, "\\r\\n"));
+        slave.write(setCommand);
+      }
+    });
+  } else {
+    // This is a slave executing a propagated command - don't send response
+    console.log(`Slave stored: ${key} = ${value}`);
+  }
 };
