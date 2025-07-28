@@ -243,53 +243,7 @@ const PORT = getPortFromArgs();
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  // if (
-  //   roleConfig.role === "slave" &&
-  //   roleConfig.masterHost &&
-  //   roleConfig.masterPort
-  // ) {
-  //   const masterClient = net.createConnection({
-  //     host: roleConfig.masterHost,
-  //     port: roleConfig.masterPort,
-  //   });
 
-  //   let handshakeStep = 0;
-
-  //   masterClient.on("connect", () => {
-  //     // Step 1: Send PING
-  //     masterClient.write("*1\r\n$4\r\nPING\r\n");
-  //     handshakeStep = 1;
-  //   });
-
-  //   masterClient.on("data", (data) => {
-  //     if (handshakeStep === 1) {
-  //       // Should receive PONG
-  //       if (data.toString().includes("PONG")) {
-  //         // Step 2: Send REPLCONF listening-port
-  //         masterClient.write(
-  //           `*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n${PORT}\r\n`
-  //         );
-  //         handshakeStep = 2;
-  //       }
-  //     } else if (handshakeStep === 2) {
-  //       // Should receive OK
-  //       if (data.toString().includes("OK")) {
-  //         // Step 3: Send REPLCONF capa (capabilities)
-  //         masterClient.write(
-  //           "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
-  //         );
-  //         handshakeStep = 3;
-  //       }
-  //     } else if (handshakeStep === 3) {
-  //       // Should receive OK
-  //       if (data.toString().includes("OK")) {
-  //         // Step 4: Send PSYNC (partial sync)
-  //         masterClient.write("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n");
-  //         handshakeStep = 4;
-  //       }
-  //     }
-  //   });
-  // }
   if (
     roleConfig.role === "slave" &&
     roleConfig.masterHost &&
@@ -399,23 +353,35 @@ server.listen(PORT, () => {
                   )}]`
                 );
 
-                // Execute the command on slave's data structures
-                executeCommand(
-                  fullCommand,
-                  command,
-                  commandArgs,
-                  masterClient, // Use masterClient as the connection (though it won't send responses)
-                  map,
-                  listMap,
-                  streamsMap,
-                  waitingClientsForStreams,
-                  waitingClientsForList,
-                  roleConfig
-                );
+                if (
+                  command.toUpperCase() === "REPLCONF" &&
+                  commandArgs.length >= 1 &&
+                  commandArgs[0].toUpperCase() === "GETACK"
+                ) {
+                  console.log("📤 Responding to REPLCONF GETACK with ACK 0");
+                  // Respond with REPLCONF ACK 0
+                  masterClient.write(
+                    "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n"
+                  );
+                } else {
+                  // Execute the command on slave's data structures
+                  executeCommand(
+                    fullCommand,
+                    command,
+                    commandArgs,
+                    masterClient, // Use masterClient as the connection (though it won't send responses)
+                    map,
+                    listMap,
+                    streamsMap,
+                    waitingClientsForStreams,
+                    waitingClientsForList,
+                    roleConfig
+                  );
 
-                console.log(
-                  `✅ Command ${command} executed successfully on slave`
-                );
+                  console.log(
+                    `✅ Command ${command} executed successfully on slave`
+                  );
+                }
               }
             } catch (parseError) {
               console.error("Error parsing individual command:", parseError);
